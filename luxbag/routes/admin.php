@@ -68,6 +68,7 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'admin'])->group(fun
         Route::get('/{order}', [OrderController::class, 'show'])->name('show');
         Route::patch('/{order}/trang-thai', [OrderController::class, 'updateStatus'])->name('status');
         Route::get('/{order}/in-hoa-don', [OrderController::class, 'invoice'])->name('invoice');
+        Route::post('/{order}/day-ghn', [OrderController::class, 'pushToGhn'])->name('push-ghn');
     });
 
     // ─── Reviews (staff có quyền) ─────────────────────────────────

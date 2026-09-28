@@ -5,12 +5,20 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\User;
+use App\Services\GhnService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class OrderController extends Controller
 {
+    protected GhnService $ghnService;
+
+    public function __construct(GhnService $ghnService)
+    {
+        $this->ghnService = $ghnService;
+    }
+
     public function index(Request $request)
     {
         $query = Order::with(['user'])->orderByDesc('created_at');
@@ -125,5 +133,52 @@ class OrderController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
+    }
+
+    /**
+     * Đẩy đơn hàng lên GHN để tạo vận đơn.
+     */
+    public function pushToGhn(Order $order)
+    {
+        if ($order->ghn_order_code) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Đơn hàng này đã được đẩy lên GHN trước đó. Mã vận đơn: ' . $order->ghn_order_code,
+            ], 422);
+        }
+
+        if (!$order->ghn_district_id || !$order->ghn_ward_code) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Đơn hàng thiếu thông tin địa chỉ GHN (district_id / ward_code). Khách hàng đã chọn địa chỉ qua GHN chưa?',
+            ], 422);
+        }
+
+        $order->load('details.product');
+
+        $result = $this->ghnService->createShippingOrder($order);
+
+        if ($result && isset($result['order_code'])) {
+            $order->update([
+                'ghn_order_code' => $result['order_code'],
+                'ghn_pushed_at'  => now(),
+                'status'         => 'shipping',
+                'shipped_at'     => now(),
+            ]);
+
+            activity_log(auth()->id(), 'push_ghn', 'Order', $order->id,
+                "Đẩy đơn #{$order->order_code} lên GHN thành công. Mã vận đơn: {$result['order_code']}");
+
+            return response()->json([
+                'success'        => true,
+                'ghn_order_code' => $result['order_code'],
+                'message'        => 'Đẩy đơn lên GHN thành công! Mã vận đơn: ' . $result['order_code'],
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Không thể tạo vận đơn GHN. Vui lòng kiểm tra log hoặc thử lại.',
+        ], 500);
     }
 }

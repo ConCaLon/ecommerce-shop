@@ -22,6 +22,12 @@
         </div>
     </div>
 
+    @if(session('error'))
+    <div class="alert alert-danger rounded-3 mb-4">
+        <i class="fas fa-exclamation-circle me-2"></i>{{ session('error') }}
+    </div>
+    @endif
+
     <div class="row g-4">
         {{-- ─── Main ─── --}}
         <div class="col-lg-8">
@@ -129,6 +135,14 @@
                 <div style="font-weight:700;font-size:14px;">{{ $order->shipping_name }}</div>
                 <div style="font-size:13px;color:#888;margin-top:2px;">{{ $order->shipping_phone }}</div>
                 <div style="font-size:13px;color:#666;margin-top:8px;line-height:1.7;">{{ $order->shipping_address }}</div>
+
+                {{-- GHN Shipping Badge --}}
+                @if($order->ghn_district_id)
+                <div style="margin-top:12px;padding-top:12px;border-top:1px solid #F3EDFB;display:flex;align-items:center;gap:8px;">
+                    <img src="https://file.hstatic.net/200000472237/file/ghn_logo_ee4e8c4dba964a3a9cf71e3996060298.png" alt="GHN" style="height:18px;object-fit:contain;" onerror="this.style.display='none'">
+                    <span style="font-size:12px;font-weight:600;color:#888;">Giao Hàng Nhanh</span>
+                </div>
+                @endif
             </div>
 
             {{-- Payment --}}
@@ -137,11 +151,12 @@
                 <div style="font-size:14px;font-weight:600;">{{ $order->payment_method_label }}</div>
                 <div style="margin-top:8px;margin-bottom:12px;">
                     <span style="font-size:12px;padding:3px 10px;border-radius:20px;font-weight:700;
-                        {{ $order->payment_status === 'paid' ? 'background:rgba(39,174,96,.1);color:#27AE60;' : 'background:rgba(243,156,18,.1);color:#F39C12;' }}">
+                        {{ $order->payment_status === 'paid' ? 'background:rgba(39,174,96,.1);color:#27AE60;' : ($order->payment_status === 'failed' ? 'background:rgba(231,76,60,.1);color:#E74C3C;' : 'background:rgba(243,156,18,.1);color:#F39C12;') }}">
                         {{ match($order->payment_status) { 'paid' => 'Đã thanh toán', 'failed' => 'Thất bại', default => 'Chờ thanh toán' } }}
                     </span>
                 </div>
 
+                {{-- Bank Transfer Info --}}
                 @if($order->payment_method === 'bank_transfer' && $order->payment_status !== 'paid' && $order->status !== 'cancelled')
                 <div style="background:#F7F2FD;border:1px solid #EAE0FA;border-radius:10px;padding:14px;font-size:12.5px;margin-top:14px;">
                     <div style="font-weight:700;margin-bottom:6px;color:#6345B5;"><i class="fas fa-university me-1"></i>Thông tin chuyển khoản:</div>
@@ -157,6 +172,35 @@
                     <div style="font-size:11px;color:#777;line-height:1.4;text-align:center;">
                         Quét mã QR và nhập đúng mã đơn hàng làm nội dung chuyển khoản.
                     </div>
+                </div>
+                @endif
+
+                {{-- MoMo Payment Info --}}
+                @if($order->payment_method === 'momo')
+                <div style="background:linear-gradient(135deg,#FFF0F7,#FFF5FA);border:1px solid #F8BBD0;border-radius:10px;padding:14px;font-size:12.5px;margin-top:14px;">
+                    <div style="font-weight:700;margin-bottom:8px;color:#ae2070;display:flex;align-items:center;gap:6px;">
+                        <i class="fas fa-mobile-alt"></i>Thanh toán MoMo
+                    </div>
+                    @if($order->payment?->transaction_id)
+                    <div style="margin-bottom:6px;">
+                        Mã giao dịch: <strong style="font-family:monospace;color:#ae2070;font-size:13px;">{{ $order->payment->transaction_id }}</strong>
+                    </div>
+                    @endif
+                    <div style="margin-bottom:4px;">
+                        Số tiền: <strong style="color:#ae2070;font-size:14px;">{{ vnd($order->total) }}</strong>
+                    </div>
+                    @if($order->payment?->paid_at)
+                    <div style="font-size:11px;color:#888;margin-top:6px;border-top:1px dashed #F8BBD0;padding-top:6px;">
+                        <i class="fas fa-check-circle me-1" style="color:#27AE60;"></i>
+                        Thanh toán lúc: {{ $order->payment->paid_at->format('H:i d/m/Y') }}
+                    </div>
+                    @endif
+                    @if($order->payment_status === 'pending' && $order->status !== 'cancelled')
+                    <div style="font-size:11px;color:#888;margin-top:6px;border-top:1px dashed #F8BBD0;padding-top:6px;">
+                        <i class="fas fa-info-circle me-1" style="color:#ae2070;"></i>
+                        Đơn hàng đang chờ thanh toán qua MoMo. Nếu bạn chưa hoàn tất, vui lòng liên hệ hỗ trợ.
+                    </div>
+                    @endif
                 </div>
                 @endif
             </div>

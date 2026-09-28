@@ -20,6 +20,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.banned' => \App\Http\Middleware\CheckBanned::class,
             'role' => \App\Http\Middleware\RoleMiddleware::class,
         ]);
+
+        // Exclude MoMo IPN from CSRF verification (external POST from MoMo servers)
+        $middleware->validateCsrfTokens(except: [
+            'momo/ipn',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

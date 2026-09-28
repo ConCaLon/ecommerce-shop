@@ -9,13 +9,25 @@ use App\Models\Coupon;
 use App\Models\CouponUsage;
 use App\Models\Payment;
 use App\Models\ShippingMethod;
-use App\Models\UserAddress;
+
+use App\Services\GhnService;
+use App\Services\MomoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class OrderController extends Controller
 {
+    protected GhnService $ghnService;
+    protected MomoService $momoService;
+
+    public function __construct(GhnService $ghnService, MomoService $momoService)
+    {
+        $this->ghnService = $ghnService;
+        $this->momoService = $momoService;
+    }
+
     public function checkout()
     {
         $cartItems = Cart::where('user_id', Auth::id())
@@ -35,9 +47,16 @@ class OrderController extends Controller
         $subtotal = $cartItems->sum(fn($item) => $item->subtotal);
         $discount = $coupon ? $coupon->calculateDiscount($subtotal) : 0;
 
+        // Lấy danh sách tỉnh từ GHN
+        $ghnProvinces = $this->ghnService->getProvinces();
+
+        // Tính tổng trọng lượng giỏ hàng
+        $totalWeight = $this->ghnService->calculateTotalWeight($cartItems);
+
         return view('orders.checkout', compact(
             'cartItems', 'addresses', 'shippingMethods',
-            'subtotal', 'discount', 'coupon'
+            'subtotal', 'discount', 'coupon',
+            'ghnProvinces', 'totalWeight'
         ));
     }
 
@@ -51,9 +70,10 @@ class OrderController extends Controller
             'shipping_district' => 'required|string|max:100',
             'shipping_ward'     => 'required|string|max:100',
             'shipping_address_detail' => 'required|string',
-            'shipping_method_id' => 'required|exists:shipping_methods,id',
-            'payment_method'    => 'required|in:cod,bank_transfer',
+            'payment_method'    => 'required|in:cod,bank_transfer,momo',
             'notes'             => 'nullable|string|max:500',
+            'ghn_district_id'   => 'nullable|integer',
+            'ghn_ward_code'     => 'nullable|string|max:20',
         ]);
 
         $cartItems = Cart::where('user_id', Auth::id())
@@ -64,24 +84,56 @@ class OrderController extends Controller
             return redirect()->route('cart.index')->with('error', 'Giỏ hàng của bạn đang trống.');
         }
 
-        $shippingMethod = ShippingMethod::findOrFail($request->shipping_method_id);
-
         $couponCode = session('coupon_code');
         $coupon = $couponCode ? Coupon::where('code', $couponCode)->where('status', 'active')->first() : null;
 
         $subtotal = $cartItems->sum(fn($item) => $item->subtotal);
-        $shippingFee = $shippingMethod->price;
         $discount = $coupon ? $coupon->calculateDiscount($subtotal) : 0;
+
+        // Tính phí ship qua GHN API
+        $shippingFee = 0;
+        $shippingMethodId = null;
+
+        if ($request->ghn_district_id && $request->ghn_ward_code) {
+            $totalWeight = $this->ghnService->calculateTotalWeight($cartItems);
+            $feeResult = $this->ghnService->calculateShippingFee(
+                (int) $request->ghn_district_id,
+                $request->ghn_ward_code,
+                $totalWeight,
+                (int) $subtotal
+            );
+
+            if ($feeResult) {
+                $shippingFee = (float) ($feeResult['total'] ?? 0);
+            }
+        }
+
+        // Fallback: nếu GHN fail hoặc không có GHN data, dùng shipping_method_id
+        if ($shippingFee == 0 && $request->shipping_method_id) {
+            $shippingMethod = ShippingMethod::find($request->shipping_method_id);
+            if ($shippingMethod) {
+                $shippingFee = (float) $shippingMethod->price;
+                $shippingMethodId = $shippingMethod->id;
+            }
+        }
+
         $total = $subtotal + $shippingFee - $discount;
 
-        DB::transaction(function () use ($request, $cartItems, $coupon, $subtotal, $shippingFee, $discount, $total, $shippingMethod) {
+        $orderCode = null;
+        $orderId = null;
+        $paymentMethod = $request->payment_method;
+
+        DB::transaction(function () use (
+            $request, $cartItems, $coupon, $subtotal, $shippingFee, $discount, $total,
+            $shippingMethodId, $paymentMethod, &$orderCode, &$orderId
+        ) {
             $order = Order::create([
                 'user_id' => Auth::id(),
                 'order_code' => Order::generateCode(),
                 'status' => 'pending',
-                'payment_method' => $request->payment_method,
+                'payment_method' => $paymentMethod,
                 'payment_status' => 'pending',
-                'shipping_method_id' => $shippingMethod->id,
+                'shipping_method_id' => $shippingMethodId,
                 'shipping_name' => $request->shipping_name,
                 'shipping_phone' => $request->shipping_phone,
                 'shipping_email' => $request->shipping_email,
@@ -89,6 +141,8 @@ class OrderController extends Controller
                 'shipping_district' => $request->shipping_district,
                 'shipping_ward' => $request->shipping_ward,
                 'shipping_address' => "{$request->shipping_address_detail}, {$request->shipping_ward}, {$request->shipping_district}, {$request->shipping_province}",
+                'ghn_district_id' => $request->ghn_district_id,
+                'ghn_ward_code' => $request->ghn_ward_code,
                 'coupon_id' => $coupon?->id,
                 'coupon_code' => $coupon?->code,
                 'subtotal' => $subtotal,
@@ -139,16 +193,35 @@ class OrderController extends Controller
             // Create payment record
             Payment::create([
                 'order_id' => $order->id,
-                'method' => $request->payment_method,
+                'method' => $paymentMethod,
                 'amount' => $total,
                 'status' => 'pending',
             ]);
 
-            // Fire order notification (email)
-            // Mail::to($request->shipping_email)->queue(new OrderConfirmationMail($order));
+            $orderCode = $order->order_code;
+            $orderId = $order->id;
 
             session(['last_order_code' => $order->order_code]);
         });
+
+        // Nếu thanh toán MoMo → redirect sang MoMo
+        if ($paymentMethod === 'momo' && $orderCode) {
+            $momoResult = $this->momoService->createPayment(
+                $orderId,
+                $orderCode,
+                (int) $total,
+                "Thanh toán đơn hàng {$orderCode} tại LuxBag"
+            );
+
+            if ($momoResult['success'] && $momoResult['payUrl']) {
+                return redirect()->away($momoResult['payUrl']);
+            }
+
+            // MoMo failed → vẫn chuyển sang confirmation, hiện lỗi
+            Log::warning('MoMo payment creation failed', ['order_code' => $orderCode, 'result' => $momoResult]);
+            return redirect()->route('orders.confirmation', $orderCode)
+                ->with('momo_error', $momoResult['message'] ?? 'Không thể tạo thanh toán MoMo. Vui lòng thử lại hoặc chọn phương thức khác.');
+        }
 
         return redirect()->route('orders.confirmation', session('last_order_code'));
     }
@@ -157,7 +230,7 @@ class OrderController extends Controller
     {
         $order = Order::where('order_code', $orderCode)
             ->where('user_id', Auth::id())
-            ->with(['details', 'shippingMethod'])
+            ->with(['details', 'shippingMethod', 'payment'])
             ->firstOrFail();
 
         return view('orders.confirmation', compact('order'));

@@ -10,6 +10,7 @@ class Order extends Model
         'user_id', 'order_code', 'status', 'payment_method', 'payment_status',
         'shipping_method_id', 'shipping_name', 'shipping_phone', 'shipping_email',
         'shipping_address', 'shipping_province', 'shipping_district', 'shipping_ward',
+        'ghn_district_id', 'ghn_ward_code', 'ghn_order_code', 'ghn_pushed_at',
         'coupon_id', 'coupon_code', 'subtotal', 'shipping_fee', 'discount_amount', 'total',
         'notes', 'cancelled_reason', 'confirmed_at', 'shipped_at', 'delivered_at', 'cancelled_at',
     ];
@@ -23,6 +24,7 @@ class Order extends Model
         'shipped_at' => 'datetime',
         'delivered_at' => 'datetime',
         'cancelled_at' => 'datetime',
+        'ghn_pushed_at' => 'datetime',
     ];
 
     // ─── Status constants ─────────────────────────────────────────

@@ -11,7 +11,23 @@
         <h5 class="fw-700 mb-1">Đơn Hàng #{{ $order->order_code }}</h5>
         <small style="color:var(--text-muted);">Đặt lúc {{ $order->created_at->format('H:i, d/m/Y') }}</small>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
+        {{-- Nút đẩy sang GHN --}}
+        @if($order->ghn_order_code)
+            <span class="btn-admin-secondary" style="cursor:default;opacity:.8;">
+                <i class="fas fa-check-circle me-1" style="color:#22c55e;"></i>
+                GHN: <strong>{{ $order->ghn_order_code }}</strong>
+            </span>
+        @elseif($order->ghn_district_id && $order->ghn_ward_code)
+            <button id="btnPushGhn" onclick="pushToGhn({{ $order->id }})" class="btn-admin-primary">
+                <i class="fas fa-truck me-1"></i>Đẩy sang GHN
+            </button>
+        @else
+            <span class="btn-admin-secondary" style="cursor:default;opacity:.6;" title="Đơn chưa có địa chỉ GHN">
+                <i class="fas fa-exclamation-triangle me-1" style="color:#f59e0b;"></i>Chưa có GHN
+            </span>
+        @endif
+
         <a href="{{ route('admin.orders.invoice', $order) }}" target="_blank" class="btn-admin-secondary">
             <i class="fas fa-print me-1"></i>In hóa đơn
         </a>
@@ -261,6 +277,37 @@ function doUpdateStatus(status, note) {
     }).done(res => {
         if (res.success) location.reload();
     }).fail(() => alert('Cập nhật thất bại!'));
+}
+
+function pushToGhn(orderId) {
+    if (!confirm('Xác nhận đẩy đơn hàng này lên GHN để tạo vận đơn?')) return;
+
+    const btn = document.getElementById('btnPushGhn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Đang xử lý...';
+
+    $.ajax({
+        url: `/admin/don-hang/${orderId}/day-ghn`,
+        method: 'POST',
+        headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+    }).done(res => {
+        if (res.success) {
+            btn.outerHTML = `<span class="btn-admin-secondary" style="cursor:default;opacity:.8;">
+                <i class="fas fa-check-circle me-1" style="color:#22c55e;"></i>
+                GHN: <strong>${res.ghn_order_code}</strong>
+            </span>`;
+            alert('✅ ' + res.message);
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-truck me-1"></i>Đẩy sang GHN';
+            alert('❌ ' + res.message);
+        }
+    }).fail(xhr => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-truck me-1"></i>Đẩy sang GHN';
+        const msg = xhr.responseJSON?.message ?? 'Lỗi không xác định. Vui lòng thử lại.';
+        alert('❌ ' + msg);
+    });
 }
 </script>
 @endsection

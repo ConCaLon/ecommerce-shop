@@ -10,6 +10,8 @@ use App\Http\Controllers\WishlistController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\PageController;
 use App\Http\Controllers\ChatbotController;
+use App\Http\Controllers\GhnController;
+use App\Http\Controllers\MomoController;
 use Illuminate\Support\Facades\Route;
 
 // ─── Public Routes ────────────────────────────────────────────────────────────
@@ -36,6 +38,18 @@ Route::prefix('')->name('pages.')->group(function () {
     Route::get('/chinh-sach-doi-tra', [PageController::class, 'policy'])->name('policy');
     Route::get('/faq', [PageController::class, 'faq'])->name('faq');
 });
+
+// ─── GHN API Routes (AJAX) ───────────────────────────────────────────────────
+Route::prefix('api/ghn')->name('ghn.')->group(function () {
+    Route::get('/provinces', [GhnController::class, 'provinces'])->name('provinces');
+    Route::get('/districts/{provinceId}', [GhnController::class, 'districts'])->name('districts');
+    Route::get('/wards/{districtId}', [GhnController::class, 'wards'])->name('wards');
+    Route::post('/calculate-fee', [GhnController::class, 'calculateFee'])->name('calculate-fee');
+});
+
+// ─── MoMo Payment Callback/IPN ───────────────────────────────────────────────
+Route::get('/momo/callback', [MomoController::class, 'callback'])->name('momo.callback');
+Route::post('/momo/ipn', [MomoController::class, 'ipn'])->name('momo.ipn');
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
 Route::middleware('guest')->group(function () {

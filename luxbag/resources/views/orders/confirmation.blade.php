@@ -18,6 +18,30 @@
             <span style="color:#666;font-size:13px;">Mã đơn hàng:</span>
             <span style="font-family:monospace;font-size:18px;font-weight:800;color:#6345B5;letter-spacing:1px;">{{ $order->order_code }}</span>
         </div>
+
+        {{-- MoMo Success Notification --}}
+        @if(session('momo_success'))
+        <div style="margin-top:20px;background:linear-gradient(135deg,#FFF0F7,#FFF5FA);border:1px solid #F8BBD0;border-radius:12px;padding:14px 24px;display:inline-flex;align-items:center;gap:10px;">
+            <div style="width:36px;height:36px;background:linear-gradient(135deg,#ae2070,#d82d8b);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <i class="fas fa-check" style="color:#fff;font-size:14px;"></i>
+            </div>
+            <div style="text-align:left;">
+                <div style="font-weight:700;font-size:14px;color:#ae2070;">Thanh toán MoMo thành công!</div>
+                <div style="font-size:12px;color:#888;">Đơn hàng đã được thanh toán qua ví MoMo</div>
+            </div>
+        </div>
+        @endif
+
+        {{-- MoMo Error Notification --}}
+        @if(session('momo_error'))
+        <div style="margin-top:20px;background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:12px;padding:14px 24px;">
+            <div style="font-weight:700;font-size:14px;color:#E74C3C;margin-bottom:4px;">
+                <i class="fas fa-exclamation-triangle me-2"></i>Thanh toán MoMo chưa hoàn tất
+            </div>
+            <div style="font-size:13px;color:#666;">{{ session('momo_error') }}</div>
+            <div style="font-size:12px;color:#888;margin-top:6px;">Bạn có thể liên hệ hỗ trợ hoặc chọn phương thức thanh toán khác.</div>
+        </div>
+        @endif
     </div>
 
     {{-- ─── Order Info ─── --}}
@@ -38,6 +62,8 @@
             <div class="col-sm-6">
                 <div style="font-size:12px;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px;">Phương thức thanh toán</div>
                 <div style="font-weight:700;">{{ $order->payment_method_label }}</div>
+
+                {{-- Bank Transfer Info --}}
                 @if($order->payment_method === 'bank_transfer')
                 <div style="margin-top:16px;background:#F7F2FD;border:1px solid #EAE0FA;border-radius:12px;padding:20px;">
                     <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#6345B5;display:flex;align-items:center;gap:8px;">
@@ -61,13 +87,54 @@
                     </div>
                 </div>
                 @endif
+
+                {{-- MoMo Payment Info --}}
+                @if($order->payment_method === 'momo')
+                <div style="margin-top:16px;background:linear-gradient(135deg,#FFF0F7,#FFF5FA);border:1px solid #F8BBD0;border-radius:12px;padding:20px;">
+                    <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#ae2070;display:flex;align-items:center;gap:8px;">
+                        <i class="fas fa-mobile-alt"></i>Thanh toán qua MoMo
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                        <span style="font-size:13px;color:#555;">Trạng thái:</span>
+                        @if($order->payment_status === 'paid')
+                        <span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:rgba(39,174,96,.1);color:#27AE60;">
+                            <i class="fas fa-check-circle me-1"></i>Đã thanh toán
+                        </span>
+                        @elseif($order->payment_status === 'failed')
+                        <span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:rgba(231,76,60,.1);color:#E74C3C;">
+                            <i class="fas fa-times-circle me-1"></i>Thanh toán thất bại
+                        </span>
+                        @else
+                        <span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:rgba(243,156,18,.1);color:#F39C12;">
+                            <i class="fas fa-clock me-1"></i>Chờ thanh toán
+                        </span>
+                        @endif
+                    </div>
+                    @if($order->payment?->transaction_id)
+                    <div style="font-size:13px;color:#555;">
+                        Mã giao dịch: <strong style="font-family:monospace;color:#ae2070;">{{ $order->payment->transaction_id }}</strong>
+                    </div>
+                    @endif
+                    <div style="font-size:13px;color:#555;margin-top:4px;">
+                        Số tiền: <strong style="color:#ae2070;font-size:16px;font-weight:800;">{{ vnd($order->total) }}</strong>
+                    </div>
+                </div>
+                @endif
             </div>
             <div class="col-sm-6">
                 <div style="font-size:12px;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px;">Vận chuyển</div>
+                @if($order->ghn_district_id)
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <img src="https://file.hstatic.net/200000472237/file/ghn_logo_ee4e8c4dba964a3a9cf71e3996060298.png" alt="GHN" style="height:20px;object-fit:contain;" onerror="this.style.display='none'">
+                    <span style="font-weight:700;">Giao Hàng Nhanh</span>
+                </div>
+                @else
                 <div style="font-weight:700;">{{ $order->shippingMethod?->name ?? 'Tiêu chuẩn' }}</div>
                 @if($order->shippingMethod?->estimated_days)
                 <div style="font-size:13px;color:#888;"><i class="fas fa-clock me-1"></i>{{ $order->shippingMethod->estimated_days }}</div>
                 @endif
+                @endif
+                <div style="font-size:13px;color:#888;margin-top:4px;">Phí: {{ $order->shipping_fee > 0 ? vnd($order->shipping_fee) : 'Miễn phí' }}</div>
             </div>
         </div>
     </div>
@@ -120,5 +187,6 @@
             <i class="fas fa-home me-2"></i>Về Trang Chủ
         </a>
     </div>
+
 </div>
 @endsection
