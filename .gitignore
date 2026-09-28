@@ -1,0 +1,5 @@
+# Files to exclude from git at project root level
+huong_dan_su_dung.md
+luxbag1.sql
+luxbag_performance_test.jmx
+jmeter.log
