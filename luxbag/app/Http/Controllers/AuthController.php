@@ -4,11 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 class AuthController extends Controller
 {
@@ -30,24 +35,27 @@ class AuthController extends Controller
 
         $credentials = $request->only('email', 'password');
         $remember = $request->boolean('remember');
+        $guestSessionId = $request->session()->getId();
 
         if (Auth::attempt($credentials, $remember)) {
             $user = Auth::user();
 
             if ($user->status === 'banned') {
                 Auth::logout();
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
                 return back()->with('error', 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ hỗ trợ.');
             }
 
-            if ($user->status === 'unverified') {
-                Auth::logout();
-                return back()->with('error', 'Vui lòng xác thực email trước khi đăng nhập.');
-            }
-
             // Merge guest cart
-            $this->mergeGuestCart($user->id);
+            $this->mergeGuestCart($user->id, $guestSessionId);
 
             $request->session()->regenerate();
+
+            if (!$user->hasVerifiedEmail()) {
+                return redirect()->intended(route('verification.notice'))
+                    ->with('warning', 'Vui lòng xác thực email để kích hoạt tài khoản và đặt hàng.');
+            }
 
             if ($user->isStaff()) {
                 return redirect()->route('admin.dashboard');
@@ -69,7 +77,7 @@ class AuthController extends Controller
     {
         $request->validate([
             'name'     => 'required|string|max:150',
-            'email'    => 'required|email|unique:users',
+            'email'    => 'required|email|max:255|unique:users',
             'phone'    => 'nullable|string|max:20',
             'password' => ['required', 'confirmed', Rules\Password::min(8)->letters()->numbers()],
         ], [
@@ -80,47 +88,81 @@ class AuthController extends Controller
             'password.confirmed' => 'Xác nhận mật khẩu không khớp.',
         ]);
 
-        $verifyToken = Str::random(64);
+        $user = DB::transaction(function () use ($request) {
+            $user = User::create([
+                'name' => $request->name,
+                'email' => $request->email,
+                'phone' => $request->phone,
+                'password' => Hash::make($request->password),
+                'status' => 'unverified',
+            ]);
 
-        $user = User::create([
-            'name'                => $request->name,
-            'email'               => $request->email,
-            'phone'               => $request->phone,
-            'password'            => Hash::make($request->password),
-            'status'              => 'unverified',
-            'email_verify_token'  => $verifyToken,
-        ]);
+            $user->assignRole('customer');
 
-        $user->assignRole('customer');
+            return $user;
+        });
 
-        // TODO: Send verification email
-        // Mail::to($user->email)->send(new VerifyEmailMail($user, $verifyToken));
-
-        // For development: auto-verify
-        $user->update(['status' => 'active', 'email_verified_at' => now(), 'email_verify_token' => null]);
+        $guestSessionId = $request->session()->getId();
         Auth::login($user);
-        $this->mergeGuestCart($user->id);
+        $this->mergeGuestCart($user->id, $guestSessionId);
+        $request->session()->regenerate();
 
-        return redirect()->route('home')->with('success', 'Đăng ký thành công! Chào mừng bạn đến với LuxBag.');
+        $sent = $this->sendVerificationEmail($user, true);
+
+        return redirect()->route('verification.notice')->with(
+            $sent ? 'success' : 'error',
+            $sent
+                ? 'Đăng ký thành công! Vui lòng kiểm tra email để xác thực tài khoản.'
+                : 'Tài khoản đã được tạo nhưng chưa gửi được email xác thực. Vui lòng thử gửi lại sau một phút.'
+        );
     }
 
     // ─── Email Verification ───────────────────────────────────────
-    public function verifyEmail($token)
+    public function showVerificationNotice(Request $request)
     {
-        $user = User::where('email_verify_token', $token)->first();
-
-        if (!$user) {
-            return redirect()->route('login')->with('error', 'Token xác thực không hợp lệ.');
+        if ($request->user()->hasVerifiedEmail()) {
+            return redirect()->route($request->user()->isStaff() ? 'admin.dashboard' : 'home');
         }
 
-        $user->update([
-            'status' => 'active',
-            'email_verified_at' => now(),
-            'email_verify_token' => null,
+        return view('auth.verify_email', [
+            'user' => $request->user(),
+            'retryAfter' => RateLimiter::availableIn('verification-email:'.$request->user()->getKey()),
+            'expiresInMinutes' => config('auth.verification.expire'),
         ]);
+    }
 
-        Auth::login($user);
-        return redirect()->route('home')->with('success', 'Email đã được xác thực thành công!');
+    public function verifyEmail(EmailVerificationRequest $request)
+    {
+        $request->fulfill();
+
+        return redirect()->intended(route($request->user()->isStaff() ? 'admin.dashboard' : 'home'))
+            ->with('success', 'Email đã được xác thực thành công! Bạn có thể bắt đầu mua sắm.');
+    }
+
+    public function resendVerificationEmail(Request $request)
+    {
+        $user = $request->user();
+
+        if ($user->hasVerifiedEmail()) {
+            return redirect()->route($user->isStaff() ? 'admin.dashboard' : 'home');
+        }
+
+        $key = 'verification-email:'.$user->getKey();
+
+        if (RateLimiter::tooManyAttempts($key, 1)) {
+            return redirect()->route('verification.notice')->with(
+                'warning', 'Vui lòng chờ '.RateLimiter::availableIn($key).' giây trước khi gửi lại email.'
+            );
+        }
+
+        $sent = $this->sendVerificationEmail($user);
+
+        return redirect()->route('verification.notice')->with(
+            $sent ? 'success' : 'error',
+            $sent
+                ? 'Email xác thực đã được gửi lại. Vui lòng kiểm tra hộp thư và thư mục Spam.'
+                : 'Chưa gửi được email xác thực. Vui lòng thử lại sau một phút.'
+        );
     }
 
     // ─── Forgot Password ──────────────────────────────────────────
@@ -207,9 +249,31 @@ class AuthController extends Controller
     }
 
     // ─── Private Helpers ──────────────────────────────────────────
-    private function mergeGuestCart(int $userId): void
+    private function sendVerificationEmail(User $user, bool $registered = false): bool
     {
-        \App\Models\Cart::where('session_id', session()->getId())
+        RateLimiter::hit('verification-email:'.$user->getKey(), 60);
+
+        try {
+            if ($registered) {
+                event(new Registered($user));
+            } else {
+                $user->sendEmailVerificationNotification();
+            }
+
+            return true;
+        } catch (TransportExceptionInterface $exception) {
+            Log::warning('Unable to send account verification email.', [
+                'user_id' => $user->getKey(),
+                'exception_type' => $exception::class,
+            ]);
+
+            return false;
+        }
+    }
+
+    private function mergeGuestCart(int $userId, string $guestSessionId): void
+    {
+        \App\Models\Cart::where('session_id', $guestSessionId)
             ->whereNull('user_id')
             ->update(['user_id' => $userId, 'session_id' => null]);
     }

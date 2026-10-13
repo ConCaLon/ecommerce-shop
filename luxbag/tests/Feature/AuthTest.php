@@ -3,8 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Spatie\Permission\Models\Role;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 /**
@@ -40,6 +41,8 @@ class AuthTest extends TestCase
 
     public function test_user_can_register_with_valid_data(): void
     {
+        Notification::fake();
+
         $response = $this->post('/dang-ky', [
             'name'                  => 'Nguyen Van Test',
             'email'                 => 'test@example.com',
@@ -48,12 +51,18 @@ class AuthTest extends TestCase
             'password_confirmation' => 'Password1',
         ]);
 
-        $response->assertRedirect(route('home'));
+        $response->assertRedirect(route('verification.notice'));
 
         $this->assertDatabaseHas('users', [
             'email' => 'test@example.com',
             'name'  => 'Nguyen Van Test',
+            'status' => 'unverified',
+            'email_verified_at' => null,
         ]);
+
+        $user = User::where('email', 'test@example.com')->firstOrFail();
+        $this->assertAuthenticatedAs($user);
+        Notification::assertSentTo($user, VerifyEmail::class);
     }
 
     public function test_registration_fails_with_duplicate_email(): void
@@ -145,7 +154,7 @@ class AuthTest extends TestCase
         $this->assertGuest();
     }
 
-    public function test_unverified_user_cannot_login(): void
+    public function test_unverified_user_is_redirected_to_verification_after_login(): void
     {
         $user = User::factory()->create([
             'password' => bcrypt('Password1'),
@@ -157,8 +166,9 @@ class AuthTest extends TestCase
             'password' => 'Password1',
         ]);
 
-        $response->assertSessionHas('error');
-        $this->assertGuest();
+        $response->assertRedirect(route('verification.notice'));
+        $response->assertSessionHas('warning');
+        $this->assertAuthenticatedAs($user);
     }
 
     // ─── Logout ───────────────────────────────────────────────────

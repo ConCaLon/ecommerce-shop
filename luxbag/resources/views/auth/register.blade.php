@@ -21,6 +21,7 @@
                 <input type="email" name="email" class="form-control @error('email') is-invalid @enderror"
                        value="{{ old('email') }}" placeholder="example@email.com" required>
                 @error('email')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                <div class="form-text">Chúng tôi sẽ gửi liên kết xác thực đến email này để kích hoạt tài khoản.</div>
             </div>
 
             <div class="mb-3">

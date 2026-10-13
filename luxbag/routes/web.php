@@ -56,7 +56,7 @@ Route::middleware('guest')->group(function () {
     Route::get('/dang-nhap', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/dang-nhap', [AuthController::class, 'login']);
     Route::get('/dang-ky', [AuthController::class, 'showRegister'])->name('register');
-    Route::post('/dang-ky', [AuthController::class, 'register']);
+    Route::post('/dang-ky', [AuthController::class, 'register'])->middleware('throttle:5,1');
     Route::get('/quen-mat-khau', [AuthController::class, 'showForgotPassword'])->name('password.request');
     Route::post('/quen-mat-khau', [AuthController::class, 'sendResetLink'])->name('password.email');
     Route::get('/dat-lai-mat-khau/{token}', [AuthController::class, 'showResetPassword'])->name('password.reset');
@@ -67,7 +67,13 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::post('/dang-xuat', [AuthController::class, 'logout'])->name('logout');
-Route::get('/xac-thuc-email/{token}', [AuthController::class, 'verifyEmail'])->name('email.verify');
+Route::middleware(['auth', 'check.banned'])->group(function () {
+    Route::get('/xac-thuc-email', [AuthController::class, 'showVerificationNotice'])->name('verification.notice');
+    Route::get('/xac-thuc-email/{id}/{hash}', [AuthController::class, 'verifyEmail'])
+        ->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
+    Route::post('/gui-lai-email-xac-thuc', [AuthController::class, 'resendVerificationEmail'])
+        ->middleware('throttle:6,1')->name('verification.send');
+});
 
 // ─── Cart Routes (guest + auth) ───────────────────────────────────────────────
 Route::prefix('gio-hang')->name('cart.')->group(function () {
@@ -82,7 +88,7 @@ Route::prefix('gio-hang')->name('cart.')->group(function () {
 });
 
 // ─── Authenticated User Routes ────────────────────────────────────────────────
-Route::middleware(['auth', 'check.banned'])->group(function () {
+Route::middleware(['auth', 'check.banned', 'verified'])->group(function () {
     // Checkout & Orders
     Route::prefix('dat-hang')->name('orders.')->group(function () {
         Route::get('/thanh-toan', [OrderController::class, 'checkout'])->name('checkout');

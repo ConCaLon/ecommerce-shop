@@ -220,6 +220,16 @@
 
 {{-- Main Content --}}
 <main id="main-content">
+    @auth
+        @if(!auth()->user()->hasVerifiedEmail() && !request()->routeIs('verification.*'))
+        <div class="container mt-3">
+            <div class="alert alert-warning" role="alert">
+                Vui lòng xác thực email để kích hoạt tài khoản và đặt hàng.
+                <a href="{{ route('verification.notice') }}" class="alert-link">Xác thực email</a>
+            </div>
+        </div>
+        @endif
+    @endauth
     @yield('content')
 </main>
 

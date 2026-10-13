@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Notifications\VerifyEmail;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasFactory, Notifiable, HasRoles;
 
@@ -92,7 +94,30 @@ class User extends Authenticatable
 
     public function isEmailVerified(): bool
     {
-        return $this->email_verified_at !== null;
+        return $this->hasVerifiedEmail();
+    }
+
+    public function hasVerifiedEmail(): bool
+    {
+        return $this->status !== 'unverified' && parent::hasVerifiedEmail();
+    }
+
+    public function markEmailAsVerified(): bool
+    {
+        if ($this->status === 'banned') {
+            return false;
+        }
+
+        return $this->forceFill([
+            'status' => 'active',
+            'email_verified_at' => $this->freshTimestamp(),
+            'email_verify_token' => null,
+        ])->save();
+    }
+
+    public function sendEmailVerificationNotification(): void
+    {
+        $this->notify(new VerifyEmail);
     }
 
     public function getAvatarUrlAttribute(): string

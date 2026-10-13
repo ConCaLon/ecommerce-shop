@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
@@ -83,6 +84,9 @@ class AdminAccessTest extends TestCase
     {
         $admin = User::factory()->create(['status' => 'active']);
         $admin->assignRole('admin');
+        $admin->givePermissionTo(Permission::firstOrCreate([
+            'name' => 'manage-customers', 'guard_name' => 'web',
+        ]));
 
         $response = $this->actingAs($admin)->get('/admin/khach-hang');
         $response->assertStatus(200);
